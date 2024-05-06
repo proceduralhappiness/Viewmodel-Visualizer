@@ -19,15 +19,144 @@ local stop = toolbar:CreateButton(
 )
 
 local connections = {}
-local canRun = true
+local canLoop = true
 
-local SLOWMOTION_MODIFIER = 1 
+local SLOWMOTION_MODIFIER = 1
 
 -- 0 = normal speed
 -- 1 = every keyframe will last 1 second longer
 
+local function playKeyframeSequence(poseTables, keyframes)
+	local lastKeyframeTime = 0
+
+	for i, posesTable in poseTables do
+		local keyframe = keyframes[i]
+
+		for part, cframe in posesTable do
+			if not canLoop then return end
+			
+			local tween = tweenService:Create(
+				part,
+				TweenInfo.new(keyframe.Time - lastKeyframeTime + SLOWMOTION_MODIFIER),
+				{["CFrame"] = cframe}
+			)
+
+			tween:Play()
+		end
+
+		task.wait(keyframe.Time - lastKeyframeTime + SLOWMOTION_MODIFIER)
+
+		lastKeyframeTime = keyframe.Time
+	end
+end
+
+local function updateViewport(viewport, model)
+	local existingClone = viewport:FindFirstChild(model.Name .. "Clone")
+
+	if existingClone then
+		existingClone.Parent = nil
+	end
+
+	local modelClone = model:Clone()
+	modelClone.Name = model.Name .. "Clone"
+	modelClone.Parent = viewport
+
+	local animation = viewport:FindFirstChild("keyframeSequence")
+
+	if not animation then
+		animation = Instance.new("Animation")
+		animation.Name = "keyframeSequence"
+		animation.Parent = viewport
+	end
+
+	local keyframeSequence
+
+	if animation.AnimationId ~= "" then
+		local controller = modelClone:FindFirstChildOfClass("Humanoid")
+			or modelClone:FindFirstChildOfClass("AnimationController")
+
+		local animator = controller:FindFirstChildOfClass("Animator")
+
+		local track = animator:LoadAnimation(animation)
+		track:Play()
+
+		return
+	end
+
+	print("No animation defined, ServerStorage.RBX_ANIMSAVES[modelName]['Automatic Save'] will be used if found.")
+
+	local directory = serverStorage:FindFirstChild("RBX_ANIMSAVES")
+	if not directory then return end
+
+	local modelAnimationSaves = directory:FindFirstChild(model.Name)
+	if not modelAnimationSaves then return end
+
+	keyframeSequence = modelAnimationSaves:FindFirstChild("Automatic Save")
+	if not keyframeSequence then return end
+
+	local keyframes = keyframeSequence:GetChildren()
+
+	table.sort(keyframes, function(l, r)
+		return l.Time > r.Time
+	end)
+
+	modelClone.Parent = workspace
+
+	local originalC0s = {}
+
+	for i, keyframe in keyframes do
+		for _, pose in keyframe:GetDescendants() do
+
+			local viewportPart = modelClone:FindFirstChild(pose.Name, true)
+			local partMotor6d = viewportPart:FindFirstChildOfClass("Motor6D")
+
+			if not partMotor6d then continue end
+
+			originalC0s[partMotor6d] = partMotor6d.C0
+		end
+	end
+
+	local poseTables = {}
+
+	for i, keyframe in keyframes do
+		local keyframePoses = {}
+
+		for _, pose in keyframe:GetDescendants() do
+
+			local viewportPart = modelClone:FindFirstChild(pose.Name, true)
+			local partMotor6d = viewportPart:FindFirstChildOfClass("Motor6D")
+
+			if not partMotor6d then continue end
+
+			local c0 = originalC0s[partMotor6d] + pose.CFrame.Position
+			c0 *= pose.CFrame.Rotation
+
+			partMotor6d.C0 = c0
+
+			local finalCF = viewportPart.CFrame
+
+			keyframePoses[viewportPart] = finalCF
+		end
+
+		table.insert(poseTables, keyframePoses)
+	end
+
+	modelClone.Parent = viewport
+
+	for _, v in modelClone:GetDescendants() do
+		if not v:IsA("Motor6D") then continue end
+
+		v.Parent = nil
+	end
+
+	repeat
+		playKeyframeSequence(poseTables, keyframes)
+
+	until not keyframeSequence.Loop or not canLoop
+end
+
 start.Click:Connect(function()
-	canRun = true
+	canLoop = true
 	
 	local screenGui = starterGui:FindFirstChild("viewmodelScreenGui")
 
@@ -85,129 +214,22 @@ start.Click:Connect(function()
 		print("ERROR: no model defined")
 		return
 	end
-
-	local existingClone = viewport:FindFirstChild(model.Value.Name .. "Clone")
-
-	if existingClone then
-		existingClone.Parent = nil
-	end
-
-	local modelClone = model.Value:Clone()
-	modelClone.Name = model.Value.Name .. "Clone"
-	modelClone.Parent = viewport
 	
-	local animation = viewport:FindFirstChild("keyframeSequence")
-	
-	if not animation then
-		animation = Instance.new("Animation")
-		animation.Name = "keyframeSequence"
-		animation.Parent = viewport
-	end
-	
-	local keyframeSequence
-	
-	if animation.AnimationId ~= "" then
-		local controller = modelClone:FindFirstChildOfClass("Humanoid")
-			or modelClone:FindFirstChildOfClass("AnimationController")
-		
-		local animator = controller:FindFirstChildOfClass("Animator")
-		
-		local track = animator:LoadAnimation(animation)
-		track:Play()
-		
-		return
-	end
-	
-	print("No animation defined, ServerStorage.RBX_ANIMSAVES[modelName]['Automatic Save'] will be used if found.")
-
 	local directory = serverStorage:FindFirstChild("RBX_ANIMSAVES")
 	if not directory then return end
-
+	
 	local modelAnimationSaves = directory:FindFirstChild(model.Value.Name)
 	if not modelAnimationSaves then return end
+	
+	connections["detectingAnimationSaves"] = modelAnimationSaves.ChildAdded:Connect(function()
+		canLoop = false
+		task.wait(.25)
+		canLoop = true
 
-	keyframeSequence = modelAnimationSaves:FindFirstChild("Automatic Save")
-	if not keyframeSequence then return end
-	
-	local keyframes = keyframeSequence:GetChildren()
-	
-	table.sort(keyframes, function(l, r)
-		return l.Time > r.Time
+		updateViewport(viewport, model.Value)
 	end)
 	
-	modelClone.Parent = workspace
-	
-	local originalC0s = {}
-	
-	for i, keyframe in keyframes do
-		for _, pose in keyframe:GetDescendants() do
-
-			local viewportPart = modelClone:FindFirstChild(pose.Name, true)
-			local partMotor6d = viewportPart:FindFirstChildOfClass("Motor6D")
-
-			if not partMotor6d then continue end
-			
-			originalC0s[partMotor6d] = partMotor6d.C0
-		end
-	end
-	
-	local formatedKeyframes = {}
-	
-	for i, keyframe in keyframes do
-		local keyframePoses = {}
-		
-		for _, pose in keyframe:GetDescendants() do
-			
-			local viewportPart = modelClone:FindFirstChild(pose.Name, true)
-			local partMotor6d = viewportPart:FindFirstChildOfClass("Motor6D")
-
-			if not partMotor6d then continue end
-			
-			local c0 = originalC0s[partMotor6d] + pose.CFrame.Position
-			c0 *= pose.CFrame.Rotation
-			
-			partMotor6d.C0 = c0
-			
-			local finalCF = viewportPart.CFrame
-			
-			keyframePoses[viewportPart] = finalCF
-		end
-		
-		table.insert(formatedKeyframes, keyframePoses)
-	end
-	
-	modelClone.Parent = viewport
-	
-	print(formatedKeyframes)
-	
-	for _, v in modelClone:GetDescendants() do
-		if not v:IsA("Motor6D") then continue end
-
-		v.Parent = nil
-	end
-	
-	repeat
-		local lastKeyframeTime = 0.01
-		
-		for i, posesTable in formatedKeyframes do
-			local keyframe = keyframes[i]
-			
-			for part, cframe in posesTable do
-				local tween = tweenService:Create(
-					part,
-					TweenInfo.new(keyframe.Time - lastKeyframeTime + SLOWMOTION_MODIFIER),
-					{["CFrame"] = cframe}
-				)
-				
-				tween:Play()
-			end
-			
-			task.wait(keyframe.Time - lastKeyframeTime + SLOWMOTION_MODIFIER)
-			
-			lastKeyframeTime = keyframe.Time
-		end
-		
-	until not keyframeSequence.Loop or not canRun
+	updateViewport(viewport, model.Value)
 end)
 
 stop.Click:Connect(function()	
@@ -232,7 +254,7 @@ stop.Click:Connect(function()
 		connection:Disconnect()
 	end
 	
-	canRun = false
+	canLoop = false
 
 	print("Successfully stopped the visualization")
 end)
