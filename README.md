@@ -37,3 +37,10 @@ I know that animating in Blender is an option but in Roblox also has its advanta
 This local plugin was made in around 5 hours as a temporary solution for previewing my viewmodel animations, however, my code is quite improvised and lacks polishing (e.g. issues 1 and 2), if you know a better resource please link it to this topic, it will help not only me but also anyone searching for something similar, I couldn't find one.
 
 If you see anything you can improve in the source code feel free to fork the repository.
+
+Update 05/06/2024
+Code readability changes
+
+Now when you click the start button if your camera subject and ViewModel are already set up you just have to save the animation on the editor, the plugin now auto-detects saves. (local, not uploading to Roblox)
+
+The changes are already committed to the repository.
